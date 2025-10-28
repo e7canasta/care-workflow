@@ -1,0 +1,98 @@
+{
+    "version": "1.0",
+    "inputs": [
+        {"type": "WorkflowImage", "name": "image"},
+        {"type": "WorkflowParameter", "name": "mqtt_host"},
+        {"type": "WorkflowParameter", "name": "mqtt_port"},
+        {"type": "WorkflowParameter", "name": "mqtt_topic"},
+        {"type": "WorkflowParameter", "name": "alarm_threshold", "default": 1},
+        {"type": "WorkflowParameter", "name": "alarm_cooldown", "default": 5.0}
+    ],
+    "steps": [
+        {
+            "type": "ObjectDetectionModel",
+            "name": "detector",
+            "image": "$inputs.image",
+            "model_id": "yolov11n-640",
+            "confidence": 0.5,
+            "class_filter": ["person"]
+        },
+        {
+            "type": "care/detections_count@v1",
+            "name": "count",
+            "predictions": "$steps.detector.predictions"
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alarm",
+            "count": "$steps.count.count",
+            "threshold": "$inputs.alarm_threshold",
+            "hysteresis": 0,
+            "cooldown_seconds": "$inputs.alarm_cooldown",
+            "alarm_message_template": "🚨 ALARMA: {count} persona(s) detectada(s) (umbral: {threshold})"
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_alarm",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "=="},
+                        "right_operand": {
+                            "type": "StaticOperand",
+                            "value": true
+                        }
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alarm.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_publisher"]
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_publisher",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "$inputs.mqtt_topic",
+            "message": "$steps.alarm.alarm_message",
+            "qos": 1,
+            "retain": false,
+            "timeout": 1.0
+        }
+    ],
+    "outputs": [
+        {
+            "type": "JsonField",
+            "name": "detections",
+            "selector": "$steps.detector.predictions"
+        },
+        {
+            "type": "JsonField",
+            "name": "person_count",
+            "selector": "$steps.count.count"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_active",
+            "selector": "$steps.alarm.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_state",
+            "selector": "$steps.alarm.state"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_message",
+            "selector": "$steps.alarm.alarm_message"
+        }
+    ]
+}

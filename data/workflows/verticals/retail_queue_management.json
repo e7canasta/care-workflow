@@ -1,0 +1,192 @@
+{
+    "version": "1.0",
+    "inputs": [
+        {"type": "WorkflowImage", "name": "image"},
+        {"type": "WorkflowParameter", "name": "mqtt_host", "default": "localhost"},
+        {"type": "WorkflowParameter", "name": "mqtt_port", "default": 1883},
+        {"type": "WorkflowParameter", "name": "checkout_lane_id", "default": "lane_1"},
+        {"type": "WorkflowParameter", "name": "queue_threshold", "default": 5},
+        {"type": "WorkflowParameter", "name": "queue_zone", "default": [[100, 200], [500, 200], [500, 800], [100, 800]]}
+    ],
+    "steps": [
+        {
+            "type": "ObjectDetectionModel",
+            "name": "detector",
+            "image": "$inputs.image",
+            "model_id": "yolov11n-640",
+            "confidence": 0.6,
+            "class_filter": ["person"]
+        },
+        {
+            "type": "roboflow_core/byte_tracker@v3",
+            "name": "tracker",
+            "detections": "$steps.detector.predictions",
+            "image": "$inputs.image"
+        },
+        {
+            "type": "roboflow_core/polygon_zone@v1",
+            "name": "zona_cola",
+            "zone": "$inputs.queue_zone",
+            "detections": "$steps.tracker.tracked_detections"
+        },
+        {
+            "type": "care/detections_count@v1",
+            "name": "count_cola",
+            "predictions": "$steps.zona_cola.detections"
+        },
+        {
+            "type": "roboflow_core/bounding_box_visualization@v1",
+            "name": "visualize_queue",
+            "predictions": "$steps.zona_cola.detections",
+            "image": "$inputs.image",
+            "color": "#00FF00"
+        },
+        {
+            "type": "roboflow_core/polygon_zone_visualization@v1",
+            "name": "visualize_zone",
+            "zone": "$inputs.queue_zone",
+            "image": "$steps.visualize_queue.image",
+            "color": "#FFD700"
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alerta_cola_larga",
+            "count": "$steps.count_cola.count",
+            "threshold": "$inputs.queue_threshold",
+            "hysteresis": 2,
+            "cooldown_seconds": 120.0,
+            "alarm_message_template": "🛒 COLA LARGA - {checkout_lane_id}: {count} clientes esperando. Abrir caja adicional."
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alerta_cola_critica",
+            "count": "$steps.count_cola.count",
+            "threshold": 8,
+            "hysteresis": 2,
+            "cooldown_seconds": 60.0,
+            "alarm_message_template": "🚨 COLA CRÍTICA - {checkout_lane_id}: {count} clientes. ACCIÓN URGENTE."
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_alerta",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "(Boolean) =="},
+                        "right_operand": {"type": "StaticOperand", "value": true}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alerta_cola_larga.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_staff_notification"]
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_critica",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "(Boolean) =="},
+                        "right_operand": {"type": "StaticOperand", "value": true}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alerta_cola_critica.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_manager_notification"]
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_staff_notification",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "store/checkout/alerts",
+            "message": "$steps.alerta_cola_larga.alarm_message",
+            "qos": 1
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_manager_notification",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "store/management/alerts",
+            "message": "$steps.alerta_cola_critica.alarm_message",
+            "qos": 1
+        },
+        {
+            "type": "roboflow_core/data_aggregator@v1",
+            "name": "queue_analytics",
+            "data": {
+                "queue_length": "$steps.count_cola.count",
+                "alarms_triggered": "$steps.alerta_cola_larga.alarm_active"
+            },
+            "aggregation_mode": {
+                "queue_length": ["avg", "max", "values_counts"],
+                "alarms_triggered": ["sum"]
+            },
+            "interval": 1800,
+            "interval_unit": "seconds"
+        },
+        {
+            "type": "roboflow_core/csv_formatter@v1",
+            "name": "queue_report",
+            "columns_data": {
+                "queue_length_avg": "$steps.queue_analytics.queue_length_avg",
+                "queue_length_max": "$steps.queue_analytics.queue_length_max",
+                "total_alarms": "$steps.queue_analytics.alarms_triggered_sum"
+            }
+        },
+        {
+            "type": "roboflow_core/local_file_sink@v1",
+            "name": "save_report",
+            "content": "$steps.queue_report.csv_content",
+            "file_type": "csv",
+            "output_mode": "append_log",
+            "target_directory": "/var/log/retail/queues",
+            "file_name_prefix": "queue_metrics",
+            "max_entries_per_file": 48
+        }
+    ],
+    "outputs": [
+        {
+            "type": "JsonField",
+            "name": "visualization",
+            "selector": "$steps.visualize_zone.image"
+        },
+        {
+            "type": "JsonField",
+            "name": "queue_length",
+            "selector": "$steps.count_cola.count"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_active",
+            "selector": "$steps.alerta_cola_larga.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_critical_active",
+            "selector": "$steps.alerta_cola_critica.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_state",
+            "selector": "$steps.alerta_cola_larga.state"
+        }
+    ]
+}

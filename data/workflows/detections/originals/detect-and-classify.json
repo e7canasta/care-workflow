@@ -1,0 +1,79 @@
+{
+    "version": "1.0",
+    "inputs": [
+      {
+        "type": "InferenceImage",
+        "name": "image"
+      }
+    ],
+    "steps": [
+      {
+        "type": "roboflow_core/roboflow_object_detection_model@v1",
+        "name": "detection_model",
+        "images": "$inputs.image",
+        "model_id": "rfdetr-nano"
+      },
+      {
+        "type": "roboflow_core/dynamic_crop@v1",
+        "name": "dynamic_crop",
+        "images": "$inputs.image",
+        "predictions": "$steps.detection_model.predictions"
+      },
+      {
+        "type": "roboflow_core/roboflow_classification_model@v1",
+        "name": "classification_model",
+        "images": "$steps.dynamic_crop.crops",
+        "model_id": "car-colors-1smyc/5"
+      },
+      {
+        "type": "roboflow_core/detections_classes_replacement@v1",
+        "name": "detections_classes_replacement",
+        "object_detection_predictions": "$steps.detection_model.predictions",
+        "classification_predictions": "$steps.classification_model.predictions"
+      },
+      {
+        "type": "roboflow_core/bounding_box_visualization@v1",
+        "name": "detections_visualization",
+        "image": "$inputs.image",
+        "predictions": "$steps.detections_classes_replacement.predictions"
+      },
+      {
+        "type": "roboflow_core/label_visualization@v1",
+        "name": "label_visualization",
+        "image": "$steps.detections_visualization.image",
+        "predictions": "$steps.detections_classes_replacement.predictions"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "JsonField",
+        "name": "output_image",
+        "coordinates_system": "own",
+        "selector": "$steps.label_visualization.image"
+      },
+      {
+        "type": "JsonField",
+        "name": "predictions",
+        "coordinates_system": "own",
+        "selector": "$steps.detections_classes_replacement.predictions"
+      },
+      {
+        "type": "JsonField",
+        "name": "dynamic_crop",
+        "coordinates_system": "own",
+        "selector": "$steps.dynamic_crop.crops"
+      },
+      {
+        "type": "JsonField",
+        "name": "detection_predictions",
+        "coordinates_system": "own",
+        "selector": "$steps.detection_model.predictions"
+      },
+      {
+        "type": "JsonField",
+        "name": "classification_predictions",
+        "coordinates_system": "own",
+        "selector": "$steps.classification_model.*"
+      }
+    ]
+  }

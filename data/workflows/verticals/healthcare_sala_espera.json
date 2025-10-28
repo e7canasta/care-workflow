@@ -1,0 +1,150 @@
+{
+    "version": "1.0",
+    "inputs": [
+        {"type": "WorkflowImage", "name": "image"},
+        {"type": "WorkflowParameter", "name": "mqtt_host", "default": "localhost"},
+        {"type": "WorkflowParameter", "name": "mqtt_port", "default": 1883},
+        {"type": "WorkflowParameter", "name": "capacidad_maxima", "default": 15},
+        {"type": "WorkflowParameter", "name": "zona_name", "default": "Sala de Espera Emergencias"}
+    ],
+    "steps": [
+        {
+            "type": "ObjectDetectionModel",
+            "name": "detector",
+            "image": "$inputs.image",
+            "model_id": "yolov11n-640",
+            "confidence": 0.6,
+            "class_filter": ["person"]
+        },
+        {
+            "type": "care/detections_count@v1",
+            "name": "count_ocupacion",
+            "predictions": "$steps.detector.predictions"
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alerta_preventiva",
+            "count": "$steps.count_ocupacion.count",
+            "threshold": 12,
+            "hysteresis": 2,
+            "cooldown_seconds": 120.0,
+            "alarm_message_template": "⚠️ PREVENTIVO: Sala al 80% ({count}/15). Preparar sala adicional."
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alerta_critica",
+            "count": "$steps.count_ocupacion.count",
+            "threshold": 15,
+            "hysteresis": 3,
+            "cooldown_seconds": 60.0,
+            "alarm_message_template": "🚨 CAPACIDAD MÁXIMA: {count}/15 personas. Habilitar sala adicional AHORA."
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alerta_sobrecapacidad",
+            "count": "$steps.count_ocupacion.count",
+            "threshold": 18,
+            "hysteresis": 2,
+            "cooldown_seconds": 30.0,
+            "alarm_message_template": "🆘 SOBRECAPACIDAD: {count}/15 personas. RIESGO DE SEGURIDAD."
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_preventiva",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "(Boolean) =="},
+                        "right_operand": {"type": "StaticOperand", "value": true}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alerta_preventiva.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_preventivo"]
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_critica",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "(Boolean) =="},
+                        "right_operand": {"type": "StaticOperand", "value": true}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alerta_critica.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_critico"]
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_preventivo",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "hospital/emergencias/capacidad/preventivo",
+            "message": "$steps.alerta_preventiva.alarm_message",
+            "qos": 1
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_critico",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "hospital/emergencias/capacidad/critico",
+            "message": "$steps.alerta_critica.alarm_message",
+            "qos": 2
+        },
+        {
+            "type": "roboflow_core/data_aggregator@v1",
+            "name": "stats_ocupacion",
+            "data": {
+                "ocupacion_actual": "$steps.count_ocupacion.count",
+                "alarmas_criticas": "$steps.alerta_critica.alarm_active"
+            },
+            "aggregation_mode": {
+                "ocupacion_actual": ["avg", "max"],
+                "alarmas_criticas": ["sum"]
+            },
+            "interval": 3600,
+            "interval_unit": "seconds"
+        }
+    ],
+    "outputs": [
+        {
+            "type": "JsonField",
+            "name": "ocupacion_actual",
+            "selector": "$steps.count_ocupacion.count"
+        },
+        {
+            "type": "JsonField",
+            "name": "alerta_preventiva_active",
+            "selector": "$steps.alerta_preventiva.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "alerta_critica_active",
+            "selector": "$steps.alerta_critica.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "estado_sistema",
+            "selector": "$steps.alerta_critica.state"
+        }
+    ]
+}

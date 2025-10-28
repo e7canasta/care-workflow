@@ -1,0 +1,61 @@
+{
+
+    "version": "1.0",
+    "inputs": [
+        {"type": "WorkflowImage", "name": "image"}
+    ],
+    "steps": [
+        {
+            "type": "ObjectDetectionModel",
+            "name": "model",
+            "image": "$inputs.image",
+            "model_id": "yolov11n-640",
+            "confidence": 0.2,
+            "class_filter": ["person"]
+        },
+        {
+            "type": "roboflow_core/bounding_box_visualization@v1",
+            "name": "bbox_visualizer",
+            "predictions": "$steps.model.predictions",
+            "image": "$inputs.image",
+            "text_scale": 1.0,
+            "text_thickness": 1,
+            "text_padding": 10
+        },
+        {
+            "type": "roboflow_core/dynamic_crop@v1",
+            "name": "crops",
+            "images": "$inputs.image",
+            "predictions": "$steps.model.predictions"
+        },
+        {
+            "type": "roboflow_core/dimension_collapse@v1",
+            "name": "crops_flattened",
+            "data": "$steps.crops.crops"
+        },
+        {
+            "type": "roboflow_core/grid_visualization@v1",
+            "name": "crops_grid",
+            "images": "$steps.crops_flattened.output",
+            "width": 640,
+            "height": 640
+        }
+    ],
+    "outputs": [
+        {
+            "type": "JsonField",
+            "name": "detections",
+            "selector": "$steps.model.predictions"
+        },
+        {
+            "type": "JsonField",
+            "name": "visualization",
+            "selector": "$steps.bbox_visualizer.image"
+        },
+        {
+            "type": "JsonField",
+            "name": "crops_grid",
+            "selector": "$steps.crops_grid.image"
+        }
+    ]
+}

@@ -1,0 +1,71 @@
+# go2rtc Configuration
+# Converts video file to RTSP stream for testing Cupertino StreamProcessor
+#
+# Usage:
+#   go2rtc -config config/go2rtc/go2rtc.yaml
+#
+# Health Check:
+#   curl http://localhost:1984/api/streams
+#
+# Test Stream:
+#   ffplay rtsp://localhost:8554/camera1
+
+streams:
+#  live/0.stream:
+  live/0:
+    rtsp://admin:ddnakmin4@192.168.2.64:554/Streaming/Channels/102     
+  live/1:
+    - ffmpeg:data/videos/vehicles-1280x720.mp4#video=h264#hardware
+  live/2:
+    - ffmpeg:data/videos/me101.mp4#video=h264#hardware
+  live/3:
+    - ffmpeg:data/videos/vador102.mp4#video=h264#hardware
+    #- ffmpeg:data/videos/me201.mp4#video=h264#hardware
+  live/4:
+    - ffmpeg:data/videos/me102.mp4#video=h264#hardware
+    # - ffmpeg:data/videos/vador101.mp4#video=h264#hardware
+  live/5:
+    - ffmpeg:data/videos/me103.mp4#video=h264#hardware
+    # - ffmpeg:data/videos/vador102.mp4#video=h264#hardware
+  live/6:
+    - ffmpeg:data/videos/me104.mp4#video=h264#hardware
+    #- ffmpeg:data/videos/vador103.mp4#video=h264#hardware
+  live/7:
+    - ffmpeg:data/videos/me105.mp4#video=h264#hardware
+    # - ffmpeg:data/videos/vador204.mp4#video=h264#hardware
+  live/8:
+    - ffmpeg:data/videos/me106.mp4#video=h264#hardware
+    #- ffmpeg:data/videos/vador305.mp4#video=h264#hardware
+  live/9:
+    - ffmpeg:data/videos/me107.mp4#video=h264#hardware
+    #- ffmpeg:data/videos/vador106.mp4#video=h264#hardware
+  live/10:
+    - ffmpeg:data/videos/me108.mp4#video=h264#hardware
+    #- ffmpeg:data/videos/vador207.mp4#video=h264#hardware
+  live/11:
+    - ffmpeg:data/videos/me109.mp4#video=h264#hardware
+    #- ffmpeg:data/videos/vador203.mp4#video=h264#hardware
+#  live/12.stream:
+   # - ffmpeg:data/videos/me102.mp4#video=h264#hardware
+   #- ffmpeg:data/videos/vador204.mp4#video=h264#hardware
+
+
+  care/bed-101/101:
+    rtsp://admin:ddnakmin4@192.168.2.64:554/Streaming/Channels/101
+  care/bed-101/102:
+    rtsp://admin:ddnakmin4@192.168.2.64:554/Streaming/Channels/102     
+  demo/vehicles:
+    - ffmpeg:data/videos/vehicles-1280x720.mp4#video=h264#hardware
+
+# API Configuration
+api:
+  listen: ":1984"  # Web UI and API on port 1984
+
+# RTSP Configuration
+rtsp:
+  listen: ":8554"  # RTSP server on port 8554
+
+# Logging
+log:
+  level: info  # Options: trace, debug, info, warn, error
+  format: text  # Options: text, json

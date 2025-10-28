@@ -1,0 +1,212 @@
+{
+    "version": "1.0",
+    "inputs": [
+        {"type": "WorkflowImage", "name": "image"},
+        {"type": "WorkflowParameter", "name": "mqtt_host", "default": "localhost"},
+        {"type": "WorkflowParameter", "name": "mqtt_port", "default": 1883},
+        {"type": "WorkflowParameter", "name": "line_id", "default": "line_1"},
+        {"type": "WorkflowParameter", "name": "defect_threshold_warning", "default": 2},
+        {"type": "WorkflowParameter", "name": "defect_threshold_adjustment", "default": 3},
+        {"type": "WorkflowParameter", "name": "defect_threshold_stop", "default": 5}
+    ],
+    "steps": [
+        {
+            "type": "ObjectDetectionModel",
+            "name": "defect_detector",
+            "image": "$inputs.image",
+            "model_id": "yolov11n-640",
+            "confidence": 0.7,
+            "class_filter": ["scratch", "crack", "misalignment", "defect"]
+        },
+        {
+            "type": "roboflow_core/bounding_box_visualization@v1",
+            "name": "visualize_defects",
+            "predictions": "$steps.defect_detector.predictions",
+            "image": "$inputs.image",
+            "color": "#FF0000"
+        },
+        {
+            "type": "care/detections_count@v1",
+            "name": "count_defects",
+            "predictions": "$steps.defect_detector.predictions"
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alerta_preventiva",
+            "count": "$steps.count_defects.count",
+            "threshold": "$inputs.defect_threshold_warning",
+            "hysteresis": 1,
+            "cooldown_seconds": 30.0,
+            "alarm_message_template": "⚠️ CALIDAD - Línea {line_id}: {count} defectos detectados. Monitorear proceso."
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alerta_ajuste",
+            "count": "$steps.count_defects.count",
+            "threshold": "$inputs.defect_threshold_adjustment",
+            "hysteresis": 1,
+            "cooldown_seconds": 15.0,
+            "alarm_message_template": "🔧 AJUSTE REQUERIDO - Línea {line_id}: {count} defectos. Supervisor de calidad notificado."
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alerta_parada",
+            "count": "$steps.count_defects.count",
+            "threshold": "$inputs.defect_threshold_stop",
+            "hysteresis": 1,
+            "cooldown_seconds": 5.0,
+            "alarm_message_template": "🛑 PARADA DE LÍNEA - Línea {line_id}: {count} defectos críticos. DETENER PRODUCCIÓN."
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_preventiva",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "(Boolean) =="},
+                        "right_operand": {"type": "StaticOperand", "value": true}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alerta_preventiva.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_preventivo"]
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_ajuste",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "(Boolean) =="},
+                        "right_operand": {"type": "StaticOperand", "value": true}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alerta_ajuste.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_ajuste"]
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_parada",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "(Boolean) =="},
+                        "right_operand": {"type": "StaticOperand", "value": true}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alerta_parada.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_stop", "$steps.save_defect_snapshot"]
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_preventivo",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "factory/quality/warning",
+            "message": "$steps.alerta_preventiva.alarm_message",
+            "qos": 1
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_ajuste",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "factory/quality/adjustment_required",
+            "message": "$steps.alerta_ajuste.alarm_message",
+            "qos": 1
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_stop",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "factory/line_1/commands/stop",
+            "message": "EMERGENCY_STOP",
+            "qos": 2,
+            "retain": false
+        },
+        {
+            "type": "roboflow_core/local_file_sink@v1",
+            "name": "save_defect_snapshot",
+            "content": "$steps.visualize_defects.image",
+            "file_type": "jpg",
+            "output_mode": "append_log",
+            "target_directory": "/var/log/quality/defects",
+            "file_name_prefix": "defect_line_1"
+        },
+        {
+            "type": "roboflow_core/data_aggregator@v1",
+            "name": "quality_metrics",
+            "data": {
+                "defect_count": "$steps.count_defects.count",
+                "alarms_warning": "$steps.alerta_preventiva.alarm_active",
+                "alarms_critical": "$steps.alerta_parada.alarm_active"
+            },
+            "aggregation_mode": {
+                "defect_count": ["sum", "avg", "max"],
+                "alarms_warning": ["sum"],
+                "alarms_critical": ["sum"]
+            },
+            "interval": 600,
+            "interval_unit": "seconds"
+        }
+    ],
+    "outputs": [
+        {
+            "type": "JsonField",
+            "name": "visualization",
+            "selector": "$steps.visualize_defects.image"
+        },
+        {
+            "type": "JsonField",
+            "name": "defect_count",
+            "selector": "$steps.count_defects.count"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_warning_active",
+            "selector": "$steps.alerta_preventiva.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_adjustment_active",
+            "selector": "$steps.alerta_ajuste.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_stop_active",
+            "selector": "$steps.alerta_parada.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_state",
+            "selector": "$steps.alerta_parada.state"
+        }
+    ]
+}

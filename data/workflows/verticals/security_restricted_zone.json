@@ -1,0 +1,232 @@
+{
+    "version": "1.0",
+    "inputs": [
+        {"type": "WorkflowImage", "name": "image"},
+        {"type": "WorkflowParameter", "name": "mqtt_host", "default": "localhost"},
+        {"type": "WorkflowParameter", "name": "mqtt_port", "default": 1883},
+        {"type": "WorkflowParameter", "name": "zone_name", "default": "Datacenter Sala Servidores"},
+        {"type": "WorkflowParameter", "name": "restricted_zone", "default": [[200, 150], [600, 150], [600, 550], [200, 550]]},
+        {"type": "WorkflowParameter", "name": "min_time_in_zone", "default": 2.0}
+    ],
+    "steps": [
+        {
+            "type": "ObjectDetectionModel",
+            "name": "detector",
+            "image": "$inputs.image",
+            "model_id": "yolov11n-640",
+            "confidence": 0.7,
+            "class_filter": ["person"]
+        },
+        {
+            "type": "roboflow_core/byte_tracker@v3",
+            "name": "tracker",
+            "detections": "$steps.detector.predictions",
+            "image": "$inputs.image"
+        },
+        {
+            "type": "roboflow_core/time_in_zone@v2",
+            "name": "zona_restringida",
+            "zone": "$inputs.restricted_zone",
+            "detections": "$steps.tracker.tracked_detections",
+            "image": "$inputs.image",
+            "triggering_anchor": "CENTER",
+            "remove_out_of_zone_detections": true,
+            "reset_out_of_zone_detections": true
+        },
+        {
+            "type": "roboflow_core/detections_filter@v1",
+            "name": "filtrar_permanencia",
+            "detections": "$steps.zona_restringida.timed_detections",
+            "filter_operation": {
+                "type": "DetectionsFilter",
+                "filter_definition": {
+                    "type": "DetectionPropertyBasedFilter",
+                    "operations": [
+                        {
+                            "type": "DetectionsPropertyFilter",
+                            "property_name": "time_in_zone",
+                            "operator": ">=",
+                            "reference_value": "$inputs.min_time_in_zone"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "care/detections_count@v1",
+            "name": "count_intrusos",
+            "predictions": "$steps.filtrar_permanencia.detections"
+        },
+        {
+            "type": "roboflow_core/bounding_box_visualization@v1",
+            "name": "visualize_intruders",
+            "predictions": "$steps.filtrar_permanencia.detections",
+            "image": "$inputs.image",
+            "color": "#FF0000",
+            "thickness": 3
+        },
+        {
+            "type": "roboflow_core/polygon_zone_visualization@v1",
+            "name": "visualize_zone",
+            "zone": "$inputs.restricted_zone",
+            "image": "$steps.visualize_intruders.image",
+            "color": "#FF0000",
+            "thickness": 2
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alarma_intrusion",
+            "count": "$steps.count_intrusos.count",
+            "threshold": 1,
+            "hysteresis": 0,
+            "cooldown_seconds": 2.0,
+            "alarm_message_template": "🚨 INTRUSIÓN DETECTADA - Zona: {zone_name} | Personas: {count} | Acción INMEDIATA requerida"
+        },
+        {
+            "type": "care/prediction_alarm@v1",
+            "name": "alarma_multiple",
+            "count": "$steps.count_intrusos.count",
+            "threshold": 2,
+            "hysteresis": 0,
+            "cooldown_seconds": 1.0,
+            "alarm_message_template": "🆘 MÚLTIPLES INTRUSOS - Zona: {zone_name} | {count} personas. ALERTA MÁXIMA."
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_intrusion",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "(Boolean) =="},
+                        "right_operand": {"type": "StaticOperand", "value": true}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alarma_intrusion.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_soc", "$steps.save_intrusion_snapshot"]
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_multiple",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "(Boolean) =="},
+                        "right_operand": {"type": "StaticOperand", "value": true}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alarma_multiple.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_emergency"]
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_soc",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "security/alarms/critical",
+            "message": "$steps.alarma_intrusion.alarm_message",
+            "qos": 2,
+            "retain": false
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_emergency",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "security/alarms/emergency",
+            "message": "$steps.alarma_multiple.alarm_message",
+            "qos": 2,
+            "retain": false
+        },
+        {
+            "type": "roboflow_core/local_file_sink@v1",
+            "name": "save_intrusion_snapshot",
+            "content": "$steps.visualize_zone.image",
+            "file_type": "jpg",
+            "output_mode": "append_log",
+            "target_directory": "/var/log/security/intrusions",
+            "file_name_prefix": "intrusion_datacenter"
+        },
+        {
+            "type": "roboflow_core/data_aggregator@v1",
+            "name": "security_metrics",
+            "data": {
+                "intrusion_events": "$steps.alarma_intrusion.alarm_active",
+                "max_intruders": "$steps.count_intrusos.count"
+            },
+            "aggregation_mode": {
+                "intrusion_events": ["sum"],
+                "max_intruders": ["max"]
+            },
+            "interval": 3600,
+            "interval_unit": "seconds"
+        },
+        {
+            "type": "roboflow_core/csv_formatter@v1",
+            "name": "security_report",
+            "columns_data": {
+                "total_intrusions": "$steps.security_metrics.intrusion_events_sum",
+                "max_simultaneous": "$steps.security_metrics.max_intruders_max"
+            }
+        },
+        {
+            "type": "roboflow_core/local_file_sink@v1",
+            "name": "save_security_log",
+            "content": "$steps.security_report.csv_content",
+            "file_type": "csv",
+            "output_mode": "append_log",
+            "target_directory": "/var/log/security/reports",
+            "file_name_prefix": "security_metrics",
+            "max_entries_per_file": 24
+        }
+    ],
+    "outputs": [
+        {
+            "type": "JsonField",
+            "name": "visualization",
+            "selector": "$steps.visualize_zone.image"
+        },
+        {
+            "type": "JsonField",
+            "name": "intruder_count",
+            "selector": "$steps.count_intrusos.count"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_intrusion_active",
+            "selector": "$steps.alarma_intrusion.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_multiple_active",
+            "selector": "$steps.alarma_multiple.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_state",
+            "selector": "$steps.alarma_intrusion.state"
+        },
+        {
+            "type": "JsonField",
+            "name": "snapshot_path",
+            "selector": "$steps.save_intrusion_snapshot.file_path"
+        }
+    ]
+}

@@ -1,0 +1,30 @@
+{
+
+    "version": "1.0",
+    "inputs": [
+        {"type": "WorkflowImage", "name": "image"}
+    ],
+    "steps": [
+        {
+            "type": "ObjectDetectionModel",
+            "name": "model",
+            "image": "$inputs.image",
+            "model_id": "yolov11n-640",
+            "confidence": 0.2,
+            "class_filter": ["person"]
+        },
+        {
+            "type": "roboflow_core/byte_tracker@v3",
+            "name": "tracker",
+            "image": "$inputs.image",
+            "detections": "$steps.model.predictions"
+        }
+    ],
+    "outputs": [
+        {
+            "type": "JsonField",
+            "name": "detections",
+            "selector": "$steps.tracker.tracked_detections"
+        }
+    ]
+}

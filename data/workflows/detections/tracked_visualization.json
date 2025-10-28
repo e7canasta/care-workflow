@@ -1,0 +1,54 @@
+{
+
+    "version": "1.0",
+    "inputs": [
+        {"type": "WorkflowImage", "name": "image"}
+    ],
+    "steps": [
+        {
+            "type": "ObjectDetectionModel",
+            "name": "model",
+            "image": "$inputs.image",
+            "model_id": "yolov11n-640",
+            "confidence": 0.2,
+            "class_filter": ["person"]
+        },
+        {
+            "type": "roboflow_core/byte_tracker@v3",
+            "name": "tracker",
+            "image": "$inputs.image",
+            "detections": "$steps.model.predictions"
+        },
+        {
+            "type": "roboflow_core/bounding_box_visualization@v1",
+            "name": "bbox_visualizer",
+            "predictions": "$steps.tracker.tracked_detections",
+            "image": "$inputs.image"
+        },
+        {
+            "type": "roboflow_core/trace_visualization@v1",
+            "name": "trace_visualizer",
+            "image": "$steps.bbox_visualizer.image",
+            "predictions": "$steps.tracker.tracked_detections"
+        },
+        {
+            "type": "roboflow_core/label_visualization@v1",
+            "name": "label_visualization",
+            "predictions": "$steps.tracker.tracked_detections",
+            "image": "$steps.trace_visualizer.image",
+            "text": "Tracker Id"
+        }
+    ],
+    "outputs": [
+        {
+            "type": "JsonField",
+            "name": "detections",
+            "selector": "$steps.tracker.tracked_detections"
+        },
+        {
+            "type": "JsonField",
+            "name": "visualization",
+            "selector": "$steps.label_visualization.image"
+        }
+    ]
+}

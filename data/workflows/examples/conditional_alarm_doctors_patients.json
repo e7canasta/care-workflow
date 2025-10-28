@@ -1,0 +1,177 @@
+{
+    "version": "1.0",
+    "inputs": [
+        {"type": "WorkflowImage", "name": "image"},
+        {"type": "WorkflowParameter", "name": "mqtt_host", "default": "localhost"},
+        {"type": "WorkflowParameter", "name": "mqtt_port", "default": 1883"},
+        {"type": "WorkflowParameter", "name": "mqtt_topic", "default": "hospital/ratio_alert"},
+        {"type": "WorkflowParameter", "name": "zona_doctors", "default": [[50, 50], [300, 50], [300, 300], [50, 300]]},
+        {"type": "WorkflowParameter", "name": "zona_patients", "default": [[400, 50], [700, 50], [700, 500], [400, 500]]}
+    ],
+    "steps": [
+        {
+            "type": "ObjectDetectionModel",
+            "name": "detector",
+            "image": "$inputs.image",
+            "model_id": "yolov11n-640",
+            "confidence": 0.6,
+            "class_filter": ["person"]
+        },
+        {
+            "type": "roboflow_core/byte_tracker@v3",
+            "name": "tracker",
+            "detections": "$steps.detector.predictions",
+            "image": "$inputs.image"
+        },
+        {
+            "type": "roboflow_core/polygon_zone@v1",
+            "name": "zona_doctors",
+            "zone": "$inputs.zona_doctors",
+            "detections": "$steps.tracker.tracked_detections"
+        },
+        {
+            "type": "roboflow_core/polygon_zone@v1",
+            "name": "zona_patients",
+            "zone": "$inputs.zona_patients",
+            "detections": "$steps.tracker.tracked_detections"
+        },
+        {
+            "type": "care/detections_count@v1",
+            "name": "count_doctors",
+            "predictions": "$steps.zona_doctors.detections"
+        },
+        {
+            "type": "care/detections_count@v1",
+            "name": "count_patients",
+            "predictions": "$steps.zona_patients.detections"
+        },
+        {
+            "type": "care/conditional_alarm@v1",
+            "name": "alerta_ratio_critico",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "doctors"
+                        },
+                        "comparator": {"type": "(Number) >="},
+                        "right_operand": {"type": "StaticOperand", "value": 2}
+                    },
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "patients"
+                        },
+                        "comparator": {"type": "(Number) >="},
+                        "right_operand": {"type": "StaticOperand", "value": 8}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "doctors": "$steps.count_doctors.count",
+                "patients": "$steps.count_patients.count"
+            },
+            "hysteresis_default": 1.0,
+            "cooldown_seconds": 30.0,
+            "alarm_message_template": "🚨 RATIO CRÍTICO: {doctors} médicos para {patients} pacientes. Reforzar personal.",
+            "combine_operator": "AND"
+        },
+        {
+            "type": "roboflow_core/bounding_box_visualization@v1",
+            "name": "visualize_doctors",
+            "predictions": "$steps.zona_doctors.detections",
+            "image": "$inputs.image",
+            "color": "#00FF00"
+        },
+        {
+            "type": "roboflow_core/bounding_box_visualization@v1",
+            "name": "visualize_patients",
+            "predictions": "$steps.zona_patients.detections",
+            "image": "$steps.visualize_doctors.image",
+            "color": "#FF0000"
+        },
+        {
+            "type": "roboflow_core/polygon_zone_visualization@v1",
+            "name": "visualize_zona_doctors",
+            "zone": "$inputs.zona_doctors",
+            "image": "$steps.visualize_patients.image",
+            "color": "#00FF00",
+            "thickness": 2
+        },
+        {
+            "type": "roboflow_core/polygon_zone_visualization@v1",
+            "name": "visualize_zona_patients",
+            "zone": "$inputs.zona_patients",
+            "image": "$steps.visualize_zona_doctors.image",
+            "color": "#FF0000",
+            "thickness": 2
+        },
+        {
+            "type": "roboflow_core/continue_if@v1",
+            "name": "check_alarm",
+            "condition_statement": {
+                "type": "StatementGroup",
+                "statements": [
+                    {
+                        "type": "BinaryStatement",
+                        "left_operand": {
+                            "type": "DynamicOperand",
+                            "operand_name": "alarm_active"
+                        },
+                        "comparator": {"type": "(Boolean) =="},
+                        "right_operand": {"type": "StaticOperand", "value": true}
+                    }
+                ]
+            },
+            "evaluation_parameters": {
+                "alarm_active": "$steps.alerta_ratio_critico.alarm_active"
+            },
+            "next_steps": ["$steps.mqtt_publisher"]
+        },
+        {
+            "type": "care/mqtt_writer@v1",
+            "name": "mqtt_publisher",
+            "host": "$inputs.mqtt_host",
+            "port": "$inputs.mqtt_port",
+            "topic": "$inputs.mqtt_topic",
+            "message": "$steps.alerta_ratio_critico.alarm_message",
+            "qos": 1
+        }
+    ],
+    "outputs": [
+        {
+            "type": "JsonField",
+            "name": "visualization",
+            "selector": "$steps.visualize_zona_patients.image"
+        },
+        {
+            "type": "JsonField",
+            "name": "doctors_count",
+            "selector": "$steps.count_doctors.count"
+        },
+        {
+            "type": "JsonField",
+            "name": "patients_count",
+            "selector": "$steps.count_patients.count"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_active",
+            "selector": "$steps.alerta_ratio_critico.alarm_active"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_state",
+            "selector": "$steps.alerta_ratio_critico.state"
+        },
+        {
+            "type": "JsonField",
+            "name": "alarm_message",
+            "selector": "$steps.alerta_ratio_critico.alarm_message"
+        }
+    ]
+}
