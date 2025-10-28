@@ -1,1 +1,0 @@
-The `ultralytics` dependency used in this model is copyrighted by Ultralytics, LLC.

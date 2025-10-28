@@ -1,4 +1,0 @@
-faiss-cpu
-requests
-Pillow
-flask
