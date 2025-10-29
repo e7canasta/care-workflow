@@ -196,6 +196,13 @@ CORE_MODEL_YOLO_WORLD_ENABLED = str2bool(
     os.getenv("CORE_MODEL_YOLO_WORLD_ENABLED", True)
 )
 
+# Local ONNX models configuration
+# Flag to enable local models (models loaded from manifests without Roboflow API), default is True
+LOCAL_MODELS_ENABLED = str2bool(os.getenv("LOCAL_MODELS_ENABLED", True))
+
+# Directory containing local model manifests and weights, default is "./models/local"
+LOCAL_MODELS_DIR = os.getenv("LOCAL_MODELS_DIR", "./models/local")
+
 # ID of host device, default is None
 DEVICE_ID = os.getenv("DEVICE_ID", None)
 

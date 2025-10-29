@@ -19,6 +19,8 @@ from care.env import (
     DISABLE_PREPROC_AUTO_ORIENT,
     ENABLE_FRAME_DROP_ON_VIDEO_FILE_RATE_LIMITING,
     ENABLE_WORKFLOWS_PROFILING,
+    LOCAL_MODELS_DIR,
+    LOCAL_MODELS_ENABLED,
     MAX_ACTIVE_MODELS,
     PREDICTIONS_QUEUE_SIZE,
     WORKFLOWS_PROFILER_BUFFER_SIZE,
@@ -57,6 +59,8 @@ from care.stream.watchdog import (
 from care.managers.active_learning import BackgroundTaskActiveLearningManager
 from care.managers.decorators.fixed_size_cache import WithFixedSizeCache
 from care.registries.roboflow import RoboflowModelRegistry
+from care.registries.local import LocalModelRegistry
+from care.registries.composite import CompositeModelRegistry
 from care.utils.function import experimental
 from care.workflows.execution_engine.profiling.core import (
     BaseWorkflowsProfiler,
@@ -621,7 +625,37 @@ class InferencePipeline:
                         workflow_id=workflow_id,
                         use_cache=use_workflow_definition_cache,
                     )
-            model_registry = RoboflowModelRegistry(ROBOFLOW_MODEL_TYPES)
+            # Initialize registries with fallback chain: Local → Roboflow
+            registries_to_use = []
+
+            # Add local registry if enabled
+            if LOCAL_MODELS_ENABLED:
+                try:
+                    local_registry = LocalModelRegistry(models_dir=LOCAL_MODELS_DIR)
+                    registries_to_use.append(local_registry)
+                    logger.info(
+                        f"Local model registry initialized from {LOCAL_MODELS_DIR}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to initialize LocalModelRegistry: {e}. "
+                        f"Will fallback to RoboflowModelRegistry only."
+                    )
+
+            # Always add Roboflow registry as fallback
+            roboflow_registry = RoboflowModelRegistry(ROBOFLOW_MODEL_TYPES)
+            registries_to_use.append(roboflow_registry)
+
+            # Use CompositeModelRegistry if multiple registries, otherwise use single registry
+            if len(registries_to_use) > 1:
+                model_registry = CompositeModelRegistry(registries_to_use)
+                logger.info(
+                    f"Using CompositeModelRegistry with {len(registries_to_use)} registries"
+                )
+            else:
+                model_registry = registries_to_use[0]
+                logger.info("Using RoboflowModelRegistry only (local models disabled or failed)")
+
             model_manager = BackgroundTaskActiveLearningManager(
                 model_registry=model_registry, cache=cache
             )

@@ -24,6 +24,7 @@ dependencies = [
     "inference>=0.37.1",
     "inference-cli>=0.37.1",
     "inference-sdk>=0.37.1",
+    "onnxruntime>=1.16.0",  # For local ONNX model inference (use onnxruntime-gpu for GPU support)
 ]
 
 [project.urls]

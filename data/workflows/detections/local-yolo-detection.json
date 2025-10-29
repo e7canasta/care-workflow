@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "inputs": [
+    {
+      "type": "InferenceImage",
+      "name": "image"
+    }
+  ],
+  "steps": [
+    {
+      "type": "ObjectDetectionModel",
+      "name": "local_yolo_detector",
+      "image": "$inputs.image",
+      "model_id": "yolov11n-320",
+      "confidence": 0.5,
+      "iou_threshold": 0.45,
+      "class_agnostic_nms": false
+    },
+    {
+      "type": "BoundingBoxVisualization",
+      "name": "bbox_viz",
+      "predictions": "$steps.local_yolo_detector.predictions",
+      "image": "$inputs.image"
+    }
+  ],
+  "outputs": [
+    {
+      "type": "JsonField",
+      "name": "predictions",
+      "selector": "$steps.local_yolo_detector.predictions"
+    },
+    {
+      "type": "JsonField",
+      "name": "visualization",
+      "selector": "$steps.bbox_viz.image"
+    }
+  ]
+}
