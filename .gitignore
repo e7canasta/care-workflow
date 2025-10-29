@@ -30,5 +30,7 @@ coverage.xml
 # Logs
 *.log
 
-./references/../HISTORIAL/
+# Project-specific exclusions  
+references/
+HISTORIAL/
 .obsidian/
